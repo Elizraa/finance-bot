@@ -1,12 +1,20 @@
 import { Telegraf, Scenes, session, Markup } from 'telegraf';
-import { message } from 'telegraf/filters';
 import dotenv from 'dotenv';
+import { Calendar } from 'telegram-inline-calendar';
 
 import { CATEGORIES } from './constant.js';
 
 dotenv.config();
 
 const { TELEGRAM_BOT_TOKEN } = process.env;
+
+const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+
+const calendar = new Calendar(bot, {
+  date_format: 'DD-MM-YYYY',
+  language: 'en',
+  bot_api: 'telegraf',
+});
 
 // Helpers
 const today = () => new Date().toISOString().slice(0, 10);
@@ -53,12 +61,28 @@ const transactionWizard = new Scenes.WizardScene(
   },
 
   async (ctx) => {
+    if (!ctx.message?.text) return;
+
     const amount = parseFloat(ctx.message.text.replace(/[^\d.-]/g, ''));
     if (isNaN(amount)) {
       await ctx.reply('Nominal tidak valid. Coba lagi.');
-      return;
+      return; // stay in same step
     }
+
     ctx.wizard.state.tx.amount = String(amount);
+
+    // Show inline calendar right away
+    calendar.startNavCalendar(ctx);
+
+    // Now move to calendar handling step
+    return ctx.wizard.next();
+  },
+
+  async (ctx) => {
+    const selected = calendar.clickButtonCalendar(ctx); // <== important
+    if (selected === -1) return; // user just clicked nav
+
+    ctx.wizard.state.tx.date = selected;
 
     let accounts;
     try {
@@ -143,7 +167,7 @@ const transactionWizard = new Scenes.WizardScene(
       transaction: {
         account_id: selected.account.id, // from selection
         name: tx.name, // typed by user
-        date: today(), // you can swap to a selected date if needed
+        date: tx.date, // you can swap to a selected date if needed
         amount: tx.amount, // will be signed by your Rails logic based on :nature
         nature: 'DEFAULT_NATURE', // "expense" by default
         currency: 'DEFAULT_CURRENCY', // optional; Rails will default to family currency if omitted
@@ -154,7 +178,6 @@ const transactionWizard = new Scenes.WizardScene(
 
     try {
       // const { data, status } = await api.post('/transactions', payload);
-      console.log('payload :>> ', payload);
 
       if (true) {
         await ctx.editMessageText(
@@ -181,7 +204,11 @@ const transactionWizard = new Scenes.WizardScene(
 // === Helper functions ===
 async function showAccounts(ctx) {
   const { tx } = ctx.wizard.state;
-  const text = `Nama: ${tx.name}\n` + `Nominal: ${tx.amount}\n` + 'Pilih akun:';
+  const text =
+    `Nama: ${tx.name}\n` +
+    `Nominal: ${tx.amount}\n` +
+    `Tanggal: ${tx.date}\n` +
+    'Pilih akun:';
 
   const { accounts } = ctx.wizard.state;
   const buttons = accounts
@@ -196,6 +223,7 @@ async function showCategories(ctx) {
   const text =
     `Nama: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
+    `Tanggal: ${tx.date}\n` +
     `Akun: ${accountName}\n` +
     'Pilih kategori:';
 
@@ -207,13 +235,14 @@ async function showCategories(ctx) {
 }
 
 async function showConfirm(ctx) {
-  const { tx, selected, accounts, categories } = ctx.wizard.state;
+  const { tx, selected } = ctx.wizard.state;
   const accountName = selected.account?.name || '-';
   const categoryName = selected.category?.name || '-';
 
   const text =
     `Nama: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
+    `Tanggal: ${tx.date}\n` +
     `Akun: ${accountName}\n` +
     `Kategori: ${categoryName}`;
 
@@ -224,7 +253,7 @@ async function showConfirm(ctx) {
 
   await ctx.editMessageText(text, Markup.inlineKeyboard(buttons));
 }
-const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+
 const stage = new Scenes.Stage([transactionWizard], { ttl: 600 });
 
 bot.use(session());
@@ -233,7 +262,6 @@ bot.use(stage.middleware());
 bot.start((ctx) => ctx.scene.enter('transaction-wizard'));
 
 bot.command('new', (ctx) => ctx.scene.enter('transaction-wizard'));
-
 bot.on('message', (ctx) => {
   if (!ctx.scene?.current) {
     return ctx.reply('Ketik /start untuk membuat transaksi baru.');

@@ -1,12 +1,27 @@
 import { Telegraf, Scenes, session, Markup } from 'telegraf';
 import dotenv from 'dotenv';
 import { Calendar } from 'telegram-inline-calendar';
+import axios from 'axios';
 
 import { CATEGORIES } from './constant.js';
 
 dotenv.config();
 
-const { TELEGRAM_BOT_TOKEN } = process.env;
+const { TELEGRAM_BOT_TOKEN, API_BASE_URL, API_KEY } = process.env;
+
+if (!TELEGRAM_BOT_TOKEN || !API_BASE_URL || !API_KEY) {
+  console.error('Please set BOT_TOKEN, API_BASE_URL, and API_BEARER in .env');
+  process.exit(1);
+}
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'x-api-key': `${API_KEY}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  },
+});
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
@@ -28,9 +43,7 @@ const parseAmount = (text) => {
 };
 
 async function fetchAccounts() {
-  // Adjust path to your API: e.g., GET /accounts?scope=family
   const { data } = await api.get('/accounts');
-  // Expect an array like [{id, name}, ...]
   return Array.isArray(data) ? data : data.accounts || [];
 }
 
@@ -69,7 +82,7 @@ const transactionWizard = new Scenes.WizardScene(
       return; // stay in same step
     }
 
-    ctx.wizard.state.tx.amount = String(amount);
+    ctx.wizard.state.tx.amount = parseAmount(amount);
 
     // Show inline calendar right away
     calendar.startNavCalendar(ctx);
@@ -86,10 +99,7 @@ const transactionWizard = new Scenes.WizardScene(
 
     let accounts;
     try {
-      accounts = [
-        { id: 1, name: 'Cash' },
-        { id: 2, name: 'Bank' },
-      ]; //await fetchAccounts();
+      accounts = await fetchAccounts();
     } catch (e) {
       console.error(e?.response?.data || e.message);
       await ctx.reply(
@@ -145,7 +155,8 @@ const transactionWizard = new Scenes.WizardScene(
     if (!ctx.callbackQuery?.data.startsWith('category:')) return;
 
     const categoryId = ctx.callbackQuery.data.split(':')[1];
-    const categoryName = ctx.callbackQuery.data.split(':')[2];
+    const categoryName =
+      ctx.wizard.state.categories.find((c) => c.id === categoryId)?.name || '';
     ctx.wizard.state.selected.category = { id: categoryId, name: categoryName };
 
     await showConfirm(ctx); // ganti halaman ke confirm
@@ -178,7 +189,7 @@ const transactionWizard = new Scenes.WizardScene(
 
     try {
       // const { data, status } = await api.post('/transactions', payload);
-
+      console.log('payload :>> ', payload);
       if (true) {
         await ctx.editMessageText(
           `✅ Tersimpan!\n\n` +
@@ -211,10 +222,17 @@ async function showAccounts(ctx) {
     'Pilih akun:';
 
   const { accounts } = ctx.wizard.state;
-  const buttons = accounts
-    .slice(0, 5)
-    .map((a) => [Markup.button.callback(a.name, `account:${a.id}:${a.name}`)]);
-  await ctx.reply(text, Markup.inlineKeyboard(buttons));
+  const rowSize = 3; // how many buttons per row
+  const buttons = accounts.map((a) =>
+    Markup.button.callback(a.name, `account:${a.id}:${a.name}`)
+  );
+
+  // Split into rows
+  const keyboard = [];
+  for (let i = 0; i < buttons.length; i += rowSize) {
+    keyboard.push(buttons.slice(i, i + rowSize));
+  }
+  await ctx.reply(text, Markup.inlineKeyboard(keyboard));
 }
 
 async function showCategories(ctx) {
@@ -228,10 +246,17 @@ async function showCategories(ctx) {
     'Pilih kategori:';
 
   const { categories } = ctx.wizard.state;
-  const buttons = categories
-    .slice(0, 5)
-    .map((c) => [Markup.button.callback(c.name, `category:${c.id}:${c.name}`)]);
-  await ctx.editMessageText(text, Markup.inlineKeyboard(buttons));
+  const rowSize = 3; // how many buttons per row
+  const buttons = categories.map((c) =>
+    Markup.button.callback(c.name, `category:${c.id}`)
+  );
+
+  // Split into rows
+  const keyboard = [];
+  for (let i = 0; i < buttons.length; i += rowSize) {
+    keyboard.push(buttons.slice(i, i + rowSize));
+  }
+  await ctx.editMessageText(text, Markup.inlineKeyboard(keyboard));
 }
 
 async function showConfirm(ctx) {

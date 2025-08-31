@@ -27,12 +27,12 @@ const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
 const calendar = new Calendar(bot, {
   date_format: 'DD-MM-YYYY',
-  language: 'en',
+  language: 'id',
   bot_api: 'telegraf',
+  custom_start_msg: 'Pilih tanggal: (tidak bisa pilih tanggal di masa depan)',
 });
 
 // Helpers
-const today = () => new Date().toISOString().slice(0, 10);
 const parseAmount = (text) => {
   // strip non-digits except dot/comma, then parse
   const normalized = String(text)
@@ -41,6 +41,25 @@ const parseAmount = (text) => {
   const n = Number(normalized);
   return Number.isFinite(n) ? n : NaN;
 };
+function isTheFuture(dateStr) {
+  // dateStr is in format "DD-MM-YYYY"
+  const [day, month, year] = dateStr.split('-');
+  const date = new Date(year, month - 1, day); // month is 0-based in JS
+  return date > new Date();
+}
+function decreaseCurrency(currentStr, amount) {
+  // Remove "Rp", dots, and replace comma with dot for decimal
+  const numeric = parseFloat(
+    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.')
+  );
+
+  const newValue = numeric - amount;
+
+  return newValue.toLocaleString('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+  });
+}
 
 async function fetchAccounts() {
   const { data } = await api.get('/accounts');
@@ -51,19 +70,13 @@ async function fetchCategories() {
   return CATEGORIES;
 }
 
-function chunk(arr, size = 3) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 // Wizard steps
 const transactionWizard = new Scenes.WizardScene(
   'transaction-wizard',
 
   async (ctx) => {
     ctx.wizard.state.tx = {};
-    await ctx.reply('Nama transaksi? (ketik bebas)');
+    await ctx.reply('Deskripsi transaksi? (ketik bebas)');
     return ctx.wizard.next();
   },
 
@@ -87,13 +100,19 @@ const transactionWizard = new Scenes.WizardScene(
     // Show inline calendar right away
     calendar.startNavCalendar(ctx);
 
-    // Now move to calendar handling step
     return ctx.wizard.next();
   },
 
   async (ctx) => {
-    const selected = calendar.clickButtonCalendar(ctx); // <== important
-    if (selected === -1) return; // user just clicked nav
+    const selected = calendar.clickButtonCalendar(ctx);
+    if (selected === -1) return;
+
+    if (isTheFuture(selected)) {
+      await ctx.reply(
+        '❌ Dibatalkan, Tidak bisa memilih tanggal di masa depan.'
+      );
+      return ctx.scene.leave();
+    }
 
     ctx.wizard.state.tx.date = selected;
 
@@ -103,14 +122,14 @@ const transactionWizard = new Scenes.WizardScene(
     } catch (e) {
       console.error(e?.response?.data || e.message);
       await ctx.reply(
-        'Gagal mengambil daftar akun dari API. Coba lagi /start.'
+        'Gagal mengambil daftar sumber dari API. Coba lagi /start.'
       );
       return ctx.scene.leave();
     }
 
     if (!accounts.length) {
       await ctx.reply(
-        'Tidak ada akun tersedia. Tambahkan akun dulu di aplikasi.'
+        'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.'
       );
       return ctx.scene.leave();
     }
@@ -173,31 +192,38 @@ const transactionWizard = new Scenes.WizardScene(
       return ctx.scene.leave();
     }
 
-    const { tx, selected } = ctx.wizard.state;
+    const { tx, selected, accounts } = ctx.wizard.state;
     const payload = {
       transaction: {
-        account_id: selected.account.id, // from selection
-        name: tx.name, // typed by user
-        date: tx.date, // you can swap to a selected date if needed
-        amount: tx.amount, // will be signed by your Rails logic based on :nature
-        nature: 'DEFAULT_NATURE', // "expense" by default
-        currency: 'DEFAULT_CURRENCY', // optional; Rails will default to family currency if omitted
-        category_id: selected.category.id, // from selection
+        account_id: selected.account.id,
+        description: tx.name,
+        date: tx.date,
+        amount: tx.amount,
+        nature: 'expense',
+        category_id: selected.category.id,
         // tag_ids: [],
       },
     };
 
     try {
-      // const { data, status } = await api.post('/transactions', payload);
-      console.log('payload :>> ', payload);
-      if (true) {
+      const { status } = await api.post('/transactions', payload);
+      if (status === 200 || status === 201) {
+        const prevBalanace = accounts.find(
+          (a) => a.id === selected.account.id
+        ).balance;
+        const newBalance = decreaseCurrency(
+          prevBalanace,
+          payload.transaction.amount
+        );
         await ctx.editMessageText(
           `✅ Tersimpan!\n\n` +
-            `Nama: ${payload.transaction.name}\n` +
-            `Akun: ${selected.account.name}\n` +
+            `Deskripsi: ${payload.transaction.description}\n` +
+            `Sumber: ${selected.account.name}\n` +
             `Tanggal: ${payload.transaction.date}\n` +
             `Jumlah: ${payload.transaction.amount}\n` +
-            `Kategori: ${selected.category.name}\n`
+            `Kategori: ${selected.category.name}\n` +
+            `Saldo sebelumnya: ${prevBalanace}\n` +
+            `Saldo baru: ${newBalance}`
         );
       } else {
         await ctx.editMessageText(`Terjadi kesalahan (status ${status}).`);
@@ -216,10 +242,10 @@ const transactionWizard = new Scenes.WizardScene(
 async function showAccounts(ctx) {
   const { tx } = ctx.wizard.state;
   const text =
-    `Nama: ${tx.name}\n` +
+    `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
-    'Pilih akun:';
+    'Pilih Sumber:';
 
   const { accounts } = ctx.wizard.state;
   const rowSize = 3; // how many buttons per row
@@ -239,10 +265,10 @@ async function showCategories(ctx) {
   const { tx, selected } = ctx.wizard.state;
   const accountName = selected.account?.name || '-';
   const text =
-    `Nama: ${tx.name}\n` +
+    `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
-    `Akun: ${accountName}\n` +
+    `Sumber: ${accountName}\n` +
     'Pilih kategori:';
 
   const { categories } = ctx.wizard.state;
@@ -265,10 +291,10 @@ async function showConfirm(ctx) {
   const categoryName = selected.category?.name || '-';
 
   const text =
-    `Nama: ${tx.name}\n` +
+    `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
-    `Akun: ${accountName}\n` +
+    `Sumber: ${accountName}\n` +
     `Kategori: ${categoryName}`;
 
   const buttons = [

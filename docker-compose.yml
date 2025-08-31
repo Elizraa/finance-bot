@@ -1,0 +1,8 @@
+version: '3.9'
+services:
+  finance-bot:
+    build: .
+    container_name: finance-bot
+    restart: always
+    env_file:
+      - .env

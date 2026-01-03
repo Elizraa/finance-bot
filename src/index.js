@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { Calendar } from 'telegram-inline-calendar';
 import axios from 'axios';
 
-import { CATEGORIES } from './constant.js';
+// import { CATEGORIES } from './constant.js';
 
 dotenv.config();
 
@@ -66,9 +66,9 @@ async function fetchAccounts() {
   return Array.isArray(data) ? data : data.accounts || [];
 }
 
-async function fetchCategories() {
-  return CATEGORIES;
-}
+// async function fetchCategories() {
+//   return CATEGORIES;
+// }
 
 // Wizard steps
 const transactionWizard = new Scenes.WizardScene(
@@ -147,40 +147,42 @@ const transactionWizard = new Scenes.WizardScene(
     const accountId = ctx.callbackQuery.data.split(':')[1];
     const accountName = ctx.callbackQuery.data.split(':')[2];
     ctx.wizard.state.selected.account = { id: accountId, name: accountName };
-    let categories;
-    try {
-      categories = await fetchCategories();
-    } catch (e) {
-      console.error(e?.response?.data || e.message);
-      await ctx.reply('Gagal mengambil kategori dari API. Coba lagi /start.');
-      return ctx.scene.leave();
-    }
+    // let categories;
+    // try {
+    //   categories = await fetchCategories();
+    // } catch (e) {
+    //   console.error(e?.response?.data || e.message);
+    //   await ctx.reply('Gagal mengambil kategori dari API. Coba lagi /start.');
+    //   return ctx.scene.leave();
+    // }
 
-    if (!categories.length) {
-      await ctx.reply(
-        'Tidak ada kategori. Tambahkan kategori dulu di aplikasi.'
-      );
-      return ctx.scene.leave();
-    }
+    // if (!categories.length) {
+    //   await ctx.reply(
+    //     'Tidak ada kategori. Tambahkan kategori dulu di aplikasi.'
+    //   );
+    //   return ctx.scene.leave();
+    // }
 
-    ctx.wizard.state.categories = categories;
+    // ctx.wizard.state.categories = categories;
 
-    await showCategories(ctx); // ganti halaman ke kategori
+    // await showCategories(ctx); // ganti halaman ke kategori
+    await showConfirm(ctx); // ganti halaman ke confirm
+
     return ctx.wizard.next();
   },
 
   // Step 5: handle kategori → lanjut konfirmasi
-  async (ctx) => {
-    if (!ctx.callbackQuery?.data.startsWith('category:')) return;
+  // async (ctx) => {
+  //   if (!ctx.callbackQuery?.data.startsWith('category:')) return;
 
-    const categoryId = ctx.callbackQuery.data.split(':')[1];
-    const categoryName =
-      ctx.wizard.state.categories.find((c) => c.id === categoryId)?.name || '';
-    ctx.wizard.state.selected.category = { id: categoryId, name: categoryName };
+  //   const categoryId = ctx.callbackQuery.data.split(':')[1];
+  //   const categoryName =
+  //     ctx.wizard.state.categories.find((c) => c.id === categoryId)?.name || '';
+  //   ctx.wizard.state.selected.category = { id: categoryId, name: categoryName };
 
-    await showConfirm(ctx); // ganti halaman ke confirm
-    return ctx.wizard.next();
-  },
+  // await showConfirm(ctx); // ganti halaman ke confirm
+  //   return ctx.wizard.next();
+  // },
 
   // 5) Capture CATEGORY → POST to Rails
   async (ctx) => {
@@ -200,7 +202,7 @@ const transactionWizard = new Scenes.WizardScene(
         date: tx.date,
         amount: tx.amount,
         nature: 'expense',
-        category_id: selected.category.id,
+        // category_id: selected.category.id,
         // tag_ids: [],
       },
     };
@@ -221,7 +223,7 @@ const transactionWizard = new Scenes.WizardScene(
             `Sumber: ${selected.account.name}\n` +
             `Tanggal: ${payload.transaction.date}\n` +
             `Jumlah: ${payload.transaction.amount}\n` +
-            `Kategori: ${selected.category.name}\n` +
+            // `Kategori: ${selected.category.name}\n` +
             `Saldo sebelumnya: ${prevBalanace}\n` +
             `Saldo baru: ${newBalance}`
         );
@@ -261,41 +263,41 @@ async function showAccounts(ctx) {
   await ctx.reply(text, Markup.inlineKeyboard(keyboard));
 }
 
-async function showCategories(ctx) {
-  const { tx, selected } = ctx.wizard.state;
-  const accountName = selected.account?.name || '-';
-  const text =
-    `Deskripsi: ${tx.name}\n` +
-    `Nominal: ${tx.amount}\n` +
-    `Tanggal: ${tx.date}\n` +
-    `Sumber: ${accountName}\n` +
-    'Pilih kategori:';
+// async function showCategories(ctx) {
+//   const { tx, selected } = ctx.wizard.state;
+//   const accountName = selected.account?.name || '-';
+//   const text =
+//     `Deskripsi: ${tx.name}\n` +
+//     `Nominal: ${tx.amount}\n` +
+//     `Tanggal: ${tx.date}\n` +
+//     `Sumber: ${accountName}\n` +
+//     'Pilih kategori:';
 
-  const { categories } = ctx.wizard.state;
-  const rowSize = 3; // how many buttons per row
-  const buttons = categories.map((c) =>
-    Markup.button.callback(c.name, `category:${c.id}`)
-  );
+//   const { categories } = ctx.wizard.state;
+//   const rowSize = 3; // how many buttons per row
+//   const buttons = categories.map((c) =>
+//     Markup.button.callback(c.name, `category:${c.id}`)
+//   );
 
-  // Split into rows
-  const keyboard = [];
-  for (let i = 0; i < buttons.length; i += rowSize) {
-    keyboard.push(buttons.slice(i, i + rowSize));
-  }
-  await ctx.editMessageText(text, Markup.inlineKeyboard(keyboard));
-}
+//   // Split into rows
+//   const keyboard = [];
+//   for (let i = 0; i < buttons.length; i += rowSize) {
+//     keyboard.push(buttons.slice(i, i + rowSize));
+//   }
+//   await ctx.editMessageText(text, Markup.inlineKeyboard(keyboard));
+// }
 
 async function showConfirm(ctx) {
   const { tx, selected } = ctx.wizard.state;
   const accountName = selected.account?.name || '-';
-  const categoryName = selected.category?.name || '-';
+  // const categoryName = selected.category?.name || '-';
 
   const text =
     `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
-    `Sumber: ${accountName}\n` +
-    `Kategori: ${categoryName}`;
+    `Sumber: ${accountName}\n`;
+  // `Kategori: ${categoryName}`;
 
   const buttons = [
     [Markup.button.callback('✅ Simpan', 'confirm:yes')],

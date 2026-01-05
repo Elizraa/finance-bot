@@ -313,8 +313,20 @@ const transactionWizard = new Scenes.WizardScene(
     if (!ctx.callbackQuery?.data.startsWith('account:')) return;
 
     const accountId = ctx.callbackQuery.data.split(':')[1];
-    const accountName = ctx.callbackQuery.data.split(':')[2];
-    ctx.wizard.state.selected.account = { id: accountId, name: accountName };
+
+    // Find account name from stored accounts
+    const { accounts } = ctx.wizard.state;
+    const selectedAccount = accounts.find((a) => a.id === accountId);
+
+    if (!selectedAccount) {
+      await ctx.answerCbQuery('❌ Akun tidak ditemukan');
+      return;
+    }
+
+    ctx.wizard.state.selected.account = {
+      id: accountId,
+      name: selectedAccount.name,
+    };
 
     await showConfirm(ctx);
     return ctx.wizard.next();
@@ -384,9 +396,9 @@ async function showAccounts(ctx) {
 
   const { accounts } = ctx.wizard.state;
   const rowSize = 3;
-  const buttons = accounts.map((a) =>
-    Markup.button.callback(a.name, `account:${a.id}:${a.name}`)
-  );
+  const buttons = accounts.map((a) => {
+    return Markup.button.callback(a.name, `account:${a.id}`);
+  });
 
   // Split into rows
   const keyboard = [];
@@ -491,7 +503,7 @@ bot.command('balance', async (ctx) => {
 
     accounts.forEach((account, index) => {
       const accountName = escapeMarkdown(account.name);
-      const balance = escapeMarkdown(account.balance);
+      const balance = account.balance;
       const accountType = escapeMarkdown(account.account_type);
       const classification =
         account.classification === 'liability' ? '💳' : '💰';
@@ -504,8 +516,8 @@ bot.command('balance', async (ctx) => {
         totalBalance += numeric;
       }
       message += `${index + 1}. *${accountName}*\n`;
-      message += `   ${balance} ${classification}\n`;
-      message += `   _${accountType}_\n\n`;
+      message += `    ${balance} ${classification}\n`;
+      message += `    _${accountType}_\n\n`;
     });
 
     message += '━━━━━━━━━━━━━━━━\n';

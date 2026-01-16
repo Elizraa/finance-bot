@@ -145,6 +145,17 @@ function decreaseCurrency(currentStr, amount) {
   });
 }
 
+function increaseCurrency(currentStr, amount) {
+  const numeric = parseFloat(
+    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.')
+  );
+  const newValue = numeric + amount;
+  return newValue.toLocaleString('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+  });
+}
+
 async function fetchAccounts(api) {
   const { data } = await api.get('/accounts');
   return Array.isArray(data) ? data : data.accounts || [];
@@ -356,13 +367,25 @@ const transactionWizard = new Scenes.WizardScene(
       const api = createApiInstance(apiKey);
       const { status } = await api.post('/transactions', payload);
       if (status === 200 || status === 201) {
-        const prevBalance = accounts.find(
+        const selectedAccount = accounts.find(
           (a) => a.id === selected.account.id
-        ).balance;
-        const newBalance = decreaseCurrency(
-          prevBalance,
-          payload.transaction.amount
         );
+
+        const prevBalance = selectedAccount.balance;
+        let newBalance = 0;
+        if (selectedAccount.classification === 'liability') {
+          // For liability accounts, we increase the balance
+          newBalance = increaseCurrency(
+            prevBalance,
+            payload.transaction.amount
+          );
+        } else {
+          newBalance = decreaseCurrency(
+            prevBalance,
+            payload.transaction.amount
+          );
+        }
+
         await ctx.editMessageText(
           `✅ Tersimpan!\n\n` +
             `Deskripsi: ${payload.transaction.description}\n` +

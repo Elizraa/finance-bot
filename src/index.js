@@ -342,6 +342,7 @@ const transactionWizard = new Scenes.WizardScene(
     ctx.wizard.state.tx.amount = parseAmount(amount);
     log.user(ctx.from.id, 'Amount set', { amount: ctx.wizard.state.tx.amount });
 
+    calendar.options.stop_date = new Date().toISOString().split('T')[0];
     calendar.startNavCalendar(ctx);
     return ctx.wizard.next();
   },

@@ -6,3 +6,12 @@ services:
     restart: always
     env_file:
       - .env
+    networks:
+      - bot-net
+
+networks:
+  bot-net:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd00:dead:beef::/48

@@ -17,7 +17,7 @@ if (!TELEGRAM_BOT_TOKEN || !API_BASE_URL) {
 // Warn if encryption key is missing
 if (!ENCRYPTION_KEY) {
   console.warn(
-    '⚠️  WARNING: ENCRYPTION_KEY not set. API keys will be stored in plain text!'
+    '⚠️  WARNING: ENCRYPTION_KEY not set. API keys will be stored in plain text!',
   );
 }
 
@@ -44,7 +44,7 @@ const dbHelpers = {
     const cipher = crypto.createCipheriv(
       'aes-256-cbc',
       Buffer.from(ENCRYPTION_KEY, 'hex'),
-      iv
+      iv,
     );
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
@@ -60,7 +60,7 @@ const dbHelpers = {
     const decipher = crypto.createDecipheriv(
       'aes-256-cbc',
       Buffer.from(ENCRYPTION_KEY, 'hex'),
-      iv
+      iv,
     );
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
@@ -81,7 +81,7 @@ const dbHelpers = {
 
   getApiKey(userId) {
     const stmt = db.prepare(
-      'SELECT api_key FROM user_api_keys WHERE user_id = ?'
+      'SELECT api_key FROM user_api_keys WHERE user_id = ?',
     );
     const row = stmt.get(userId);
     return row ? this.decrypt(row.api_key) : null;
@@ -136,7 +136,7 @@ function isTheFuture(dateStr) {
 
 function decreaseCurrency(currentStr, amount) {
   const numeric = parseFloat(
-    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.')
+    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.'),
   );
   const newValue = numeric - amount;
   return newValue.toLocaleString('id-ID', {
@@ -147,7 +147,7 @@ function decreaseCurrency(currentStr, amount) {
 
 function increaseCurrency(currentStr, amount) {
   const numeric = parseFloat(
-    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.')
+    currentStr.replace(/[Rp\s.]/g, '').replace(',', '.'),
   );
   const newValue = numeric + amount;
   return newValue.toLocaleString('id-ID', {
@@ -168,7 +168,7 @@ const apiKeyWizard = new Scenes.WizardScene(
   async (ctx) => {
     await ctx.reply(
       '🔑 Silakan masukkan API Key Anda:\n\n' +
-        '(API Key akan disimpan dengan enkripsi dan digunakan untuk semua transaksi Anda)'
+        '(API Key akan disimpan dengan enkripsi dan digunakan untuk semua transaksi Anda)',
     );
     return ctx.wizard.next();
   },
@@ -199,7 +199,7 @@ const apiKeyWizard = new Scenes.WizardScene(
 
       await ctx.reply(
         '✅ API Key berhasil disimpan!\n\n' +
-          'Gunakan /create untuk membuat transaksi baru.'
+          'Gunakan /create untuk membuat transaksi baru.',
       );
     } catch (e) {
       await ctx.reply(
@@ -207,12 +207,12 @@ const apiKeyWizard = new Scenes.WizardScene(
           'Error: ' +
           (e.response?.data?.message || e.message) +
           '\n\n' +
-          'Silakan coba lagi dengan /reset'
+          'Silakan coba lagi dengan /reset',
       );
     }
 
     return ctx.scene.leave();
-  }
+  },
 );
 
 // Transaction wizard
@@ -226,7 +226,7 @@ const transactionWizard = new Scenes.WizardScene(
     if (!apiKey) {
       await ctx.reply(
         '❌ API Key belum diatur.\n\n' +
-          'Gunakan /reset untuk mengatur API Key terlebih dahulu.'
+          'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
       );
       return ctx.scene.leave();
     }
@@ -235,7 +235,7 @@ const transactionWizard = new Scenes.WizardScene(
     ctx.wizard.state.apiKey = apiKey;
     await ctx.reply(
       'Deskripsi transaksi? (ketik bebas)',
-      Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]])
+      Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]]),
     );
     return ctx.wizard.next();
   },
@@ -252,7 +252,7 @@ const transactionWizard = new Scenes.WizardScene(
     ctx.wizard.state.tx.name = ctx.message.text.trim();
     await ctx.reply(
       'Nominal transaksi? (angka)',
-      Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]])
+      Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]]),
     );
     return ctx.wizard.next();
   },
@@ -277,12 +277,14 @@ const transactionWizard = new Scenes.WizardScene(
   },
 
   async (ctx) => {
+    if (!ctx.callbackQuery) return;
+
     const selected = calendar.clickButtonCalendar(ctx);
     if (selected === -1) return;
 
     if (isTheFuture(selected)) {
       await ctx.reply(
-        '❌ Dibatalkan, Tidak bisa memilih tanggal di masa depan.'
+        '❌ Dibatalkan, Tidak bisa memilih tanggal di masa depan.',
       );
       return ctx.scene.leave();
     }
@@ -296,14 +298,14 @@ const transactionWizard = new Scenes.WizardScene(
     } catch (e) {
       console.error(e?.response?.data || e.message);
       await ctx.reply(
-        'Gagal mengambil daftar sumber dari API. Coba lagi /create.'
+        'Gagal mengambil daftar sumber dari API. Coba lagi /create.',
       );
       return ctx.scene.leave();
     }
 
     if (!accounts.length) {
       await ctx.reply(
-        'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.'
+        'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.',
       );
       return ctx.scene.leave();
     }
@@ -368,7 +370,7 @@ const transactionWizard = new Scenes.WizardScene(
       const { status } = await api.post('/transactions', payload);
       if (status === 200 || status === 201) {
         const selectedAccount = accounts.find(
-          (a) => a.id === selected.account.id
+          (a) => a.id === selected.account.id,
         );
 
         const prevBalance = selectedAccount.balance;
@@ -377,12 +379,12 @@ const transactionWizard = new Scenes.WizardScene(
           // For liability accounts, we increase the balance
           newBalance = increaseCurrency(
             prevBalance,
-            payload.transaction.amount
+            payload.transaction.amount,
           );
         } else {
           newBalance = decreaseCurrency(
             prevBalance,
-            payload.transaction.amount
+            payload.transaction.amount,
           );
         }
 
@@ -393,19 +395,19 @@ const transactionWizard = new Scenes.WizardScene(
             `Tanggal: ${payload.transaction.date}\n` +
             `Jumlah: ${payload.transaction.amount}\n` +
             `Saldo sebelumnya: ${prevBalance}\n` +
-            `Saldo baru: ${newBalance}`
+            `Saldo baru: ${newBalance}`,
         );
       } else {
         await ctx.editMessageText(`Terjadi kesalahan (status ${status}).`);
       }
     } catch (e) {
       await ctx.editMessageText(
-        '❌ Gagal simpan: ' + (e.response?.data?.message || e.message)
+        '❌ Gagal simpan: ' + (e.response?.data?.message || e.message),
       );
     }
 
     return ctx.scene.leave();
-  }
+  },
 );
 
 // Helper functions
@@ -470,12 +472,12 @@ bot.start((ctx) => {
         '/create - Buat transaksi baru\n' +
         '/balance - Lihat saldo akun\n' +
         '/reset - Ganti API Key\n' +
-        '/delete - Hapus API Key'
+        '/delete - Hapus API Key',
     );
   } else {
     return ctx.reply(
       '👋 Selamat datang!\n\n' +
-        'Untuk memulai, silakan atur API Key Anda dengan perintah /reset'
+        'Untuk memulai, silakan atur API Key Anda dengan perintah /reset',
     );
   }
 });
@@ -485,7 +487,7 @@ bot.command('create', (ctx) => {
   if (!dbHelpers.hasApiKey(userId)) {
     return ctx.reply(
       '❌ API Key belum diatur.\n\n' +
-        'Gunakan /reset untuk mengatur API Key terlebih dahulu.'
+        'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
     );
   }
   return ctx.scene.enter('transaction-wizard');
@@ -500,7 +502,7 @@ bot.command('balance', async (ctx) => {
   if (!apiKey) {
     return ctx.reply(
       '❌ API Key belum diatur.\n\n' +
-        'Gunakan /reset untuk mengatur API Key terlebih dahulu.'
+        'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
     );
   }
 
@@ -531,7 +533,7 @@ bot.command('balance', async (ctx) => {
       const classification =
         account.classification === 'liability' ? '💳' : '💰';
       const numeric = parseFloat(
-        account.balance.replace(/[Rp\s.]/g, '').replace(',', '.')
+        account.balance.replace(/[Rp\s.]/g, '').replace(',', '.'),
       );
       if (account.classification === 'liability') {
         totalBalance -= numeric;
@@ -555,7 +557,7 @@ bot.command('balance', async (ctx) => {
     await ctx.reply(
       '❌ Gagal mengambil data saldo.\n\n' +
         'Error: ' +
-        (e.response?.data?.message || e.message)
+        (e.response?.data?.message || e.message),
     );
   }
 });
@@ -569,14 +571,14 @@ bot.command('delete', (ctx) => {
   dbHelpers.deleteApiKey(userId);
   return ctx.reply(
     '✅ API Key berhasil dihapus.\n\n' +
-      'Gunakan /reset untuk mengatur API Key baru.'
+      'Gunakan /reset untuk mengatur API Key baru.',
   );
 });
 
 bot.command('new', (ctx) => {
   return ctx.reply(
     'ℹ️  Perintah /new sudah tidak digunakan.\n' +
-      'Gunakan /create untuk membuat transaksi baru.'
+      'Gunakan /create untuk membuat transaksi baru.',
   );
 });
 
@@ -586,7 +588,7 @@ bot.on('message', (ctx) => {
       'Perintah yang tersedia:\n' +
         '/create - Buat transaksi baru\n' +
         '/balance - Lihat saldo akun\n' +
-        '/reset - Ganti API Key'
+        '/reset - Ganti API Key',
     );
   }
 });

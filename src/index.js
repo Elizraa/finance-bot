@@ -81,10 +81,21 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS user_api_keys (
     user_id INTEGER PRIMARY KEY,
     api_key TEXT NOT NULL,
+    categories_enabled INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
+
+// Migrate existing tables that don't have the categories_enabled column yet
+try {
+  db.exec(
+    `ALTER TABLE user_api_keys ADD COLUMN categories_enabled INTEGER NOT NULL DEFAULT 0`,
+  );
+  log.info('Migrated user_api_keys: added categories_enabled column');
+} catch {
+  // Column already exists — safe to ignore
+}
 
 log.info('Database initialised', { file: 'bot_data.db' });
 
@@ -150,6 +161,25 @@ const dbHelpers = {
         .get(userId) !== undefined
     );
   },
+
+  // ── Category toggle helpers ──────────────────────────────────────────────
+
+  getCategoriesEnabled(userId) {
+    const row = db
+      .prepare('SELECT categories_enabled FROM user_api_keys WHERE user_id = ?')
+      .get(userId);
+    return row ? row.categories_enabled === 1 : false;
+  },
+
+  toggleCategories(userId) {
+    const current = this.getCategoriesEnabled(userId);
+    const next = current ? 0 : 1;
+    db.prepare(
+      `UPDATE user_api_keys SET categories_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+    ).run(next, userId);
+    log.user(userId, 'Categories toggled', { enabled: next === 1 });
+    return next === 1;
+  },
 };
 
 // ─── Bot & API ───────────────────────────────────────────────────────────────
@@ -213,6 +243,11 @@ async function fetchAccounts(api) {
   return Array.isArray(data) ? data : data.accounts || [];
 }
 
+async function fetchCategories(api) {
+  const { data } = await api.get('/categories');
+  return Array.isArray(data) ? data : data.categories || [];
+}
+
 // ─── API Key Wizard ───────────────────────────────────────────────────────────
 
 const apiKeyWizard = new Scenes.WizardScene(
@@ -273,10 +308,24 @@ const apiKeyWizard = new Scenes.WizardScene(
 );
 
 // ─── Transaction Wizard ───────────────────────────────────────────────────────
+//
+// Step layout:
+//   0 → guard + ask description
+//   1 → save description, ask amount
+//   2 → save amount, show calendar
+//   3 → save date
+//         categories ON  → fetch & show categories → next (step 4: cat handler)
+//         categories OFF → fetch & show accounts   → next (step 4: acc handler)
+//   4 → categories ON:  save category → fetch & show accounts → next (step 5: acc handler)
+//       categories OFF: save account  → show confirm          → next (step 5: confirm)
+//   5 → categories ON:  save account → show confirm → next (step 6: confirm)
+//       categories OFF: confirm → submit → leave
+//   6 → categories ON:  confirm → submit → leave
 
 const transactionWizard = new Scenes.WizardScene(
   'transaction-wizard',
 
+  // ── Step 0 ─────────────────────────────────────────────────────────────────
   async (ctx) => {
     const userId = ctx.from.id;
     const apiKey = dbHelpers.getApiKey(userId);
@@ -293,6 +342,8 @@ const transactionWizard = new Scenes.WizardScene(
     log.user(userId, 'Entered transaction-wizard');
     ctx.wizard.state.tx = {};
     ctx.wizard.state.apiKey = apiKey;
+    ctx.wizard.state.categoriesEnabled = dbHelpers.getCategoriesEnabled(userId);
+
     await ctx.reply(
       'Deskripsi transaksi? (ketik bebas)',
       Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]]),
@@ -300,13 +351,13 @@ const transactionWizard = new Scenes.WizardScene(
     return ctx.wizard.next();
   },
 
+  // ── Step 1 ─────────────────────────────────────────────────────────────────
   async (ctx) => {
     if (ctx.callbackQuery?.data === 'cancel') {
       log.user(ctx.from.id, 'Transaction cancelled at description step');
       await ctx.editMessageText('❌ Transaksi dibatalkan.');
       return ctx.scene.leave();
     }
-
     if (!ctx.message?.text) return;
 
     ctx.wizard.state.tx.name = ctx.message.text.trim();
@@ -321,13 +372,13 @@ const transactionWizard = new Scenes.WizardScene(
     return ctx.wizard.next();
   },
 
+  // ── Step 2 ─────────────────────────────────────────────────────────────────
   async (ctx) => {
     if (ctx.callbackQuery?.data === 'cancel') {
       log.user(ctx.from.id, 'Transaction cancelled at amount step');
       await ctx.editMessageText('❌ Transaksi dibatalkan.');
       return ctx.scene.leave();
     }
-
     if (!ctx.message?.text) return;
 
     const amount = parseFloat(ctx.message.text.replace(/[^\d.-]/g, ''));
@@ -347,6 +398,7 @@ const transactionWizard = new Scenes.WizardScene(
     return ctx.wizard.next();
   },
 
+  // ── Step 3: date → branch on categories toggle ─────────────────────────────
   async (ctx) => {
     if (!ctx.callbackQuery) return;
 
@@ -364,153 +416,273 @@ const transactionWizard = new Scenes.WizardScene(
     }
 
     ctx.wizard.state.tx.date = selected;
+    ctx.wizard.state.selected = { account: null, category: null };
     log.user(ctx.from.id, 'Date selected', { date: selected });
 
     const api = createApiInstance(ctx.wizard.state.apiKey);
-    let accounts;
-    try {
-      accounts = await fetchAccounts(api);
-    } catch (e) {
-      log.userError(ctx.from.id, 'Failed to fetch accounts', {
-        reason: e?.response?.data || e.message,
-      });
-      await ctx.reply(
-        'Gagal mengambil daftar sumber dari API. Coba lagi /create.',
-      );
-      return ctx.scene.leave();
+
+    if (ctx.wizard.state.categoriesEnabled) {
+      // ── Fetch categories ──
+      let categories;
+      try {
+        categories = await fetchCategories(api);
+      } catch (e) {
+        log.userError(ctx.from.id, 'Failed to fetch categories', {
+          reason: e?.response?.data || e.message,
+        });
+        await ctx.reply(
+          'Gagal mengambil daftar kategori dari API. Coba lagi /create.',
+        );
+        return ctx.scene.leave();
+      }
+
+      ctx.wizard.state.categories = categories;
+
+      if (!categories.length) {
+        // No categories — skip straight to accounts
+        log.user(
+          ctx.from.id,
+          'No categories available, skipping category step',
+        );
+        await _loadAndShowAccounts(ctx, api);
+        ctx.wizard.state.skipCategoryStep = true;
+      } else {
+        await showCategories(ctx);
+        ctx.wizard.state.skipCategoryStep = false;
+      }
+    } else {
+      // ── Fetch accounts directly ──
+      await _loadAndShowAccounts(ctx, api);
     }
 
-    if (!accounts.length) {
-      log.user(ctx.from.id, 'No accounts available');
-      await ctx.reply(
-        'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.',
-      );
-      return ctx.scene.leave();
-    }
-
-    ctx.wizard.state.accounts = accounts;
-    ctx.wizard.state.selected = { account: null, category: null };
-
-    await showAccounts(ctx);
-    return ctx.wizard.next();
+    return ctx.wizard.next(); // → step 4
   },
 
+  // ── Step 4 ─────────────────────────────────────────────────────────────────
   async (ctx) => {
     if (ctx.callbackQuery?.data === 'cancel') {
-      log.user(ctx.from.id, 'Transaction cancelled at account selection');
       await ctx.editMessageText('❌ Transaksi dibatalkan.');
       return ctx.scene.leave();
     }
 
-    if (!ctx.callbackQuery?.data.startsWith('account:')) return;
+    const { categoriesEnabled, skipCategoryStep } = ctx.wizard.state;
+
+    if (categoriesEnabled && !skipCategoryStep) {
+      // Expect a category: callback
+      if (!ctx.callbackQuery?.data?.startsWith('category:')) return;
+
+      const categoryId = ctx.callbackQuery.data.split(':')[1];
+      const cat = ctx.wizard.state.categories.find((c) => c.id === categoryId);
+      if (!cat) {
+        await ctx.answerCbQuery('❌ Kategori tidak ditemukan');
+        return;
+      }
+
+      ctx.wizard.state.selected.category = { id: categoryId, name: cat.name };
+      log.user(ctx.from.id, 'Category selected', {
+        categoryId,
+        categoryName: cat.name,
+      });
+
+      // Now fetch + show accounts (same bubble as category picker)
+      const api = createApiInstance(ctx.wizard.state.apiKey);
+      await _loadAndShowAccounts(ctx, api, { replaceMessage: true });
+      return ctx.wizard.next(); // → step 5
+    }
+
+    // categories OFF  OR  categories ON but skipCategoryStep=true
+    // Expect an account: callback
+    if (!ctx.callbackQuery?.data?.startsWith('account:')) return;
 
     const accountId = ctx.callbackQuery.data.split(':')[1];
-    const { accounts } = ctx.wizard.state;
-    const selectedAccount = accounts.find((a) => a.id === accountId);
-
-    if (!selectedAccount) {
-      log.user(ctx.from.id, 'Account not found in state', { accountId });
+    const acc = ctx.wizard.state.accounts.find((a) => a.id === accountId);
+    if (!acc) {
       await ctx.answerCbQuery('❌ Akun tidak ditemukan');
       return;
     }
 
-    ctx.wizard.state.selected.account = {
-      id: accountId,
-      name: selectedAccount.name,
-    };
+    ctx.wizard.state.selected.account = { id: accountId, name: acc.name };
     log.user(ctx.from.id, 'Account selected', {
       accountId,
-      accountName: selectedAccount.name,
+      accountName: acc.name,
     });
 
     await showConfirm(ctx);
-    return ctx.wizard.next();
+    return ctx.wizard.next(); // → step 5
   },
 
+  // ── Step 5 ─────────────────────────────────────────────────────────────────
   async (ctx) => {
-    if (!ctx.callbackQuery?.data.startsWith('confirm:')) return;
+    if (ctx.callbackQuery?.data === 'cancel') {
+      await ctx.editMessageText('❌ Transaksi dibatalkan.');
+      return ctx.scene.leave();
+    }
 
-    const action = ctx.callbackQuery.data.split(':')[1];
-    if (action === 'no') {
-      log.user(ctx.from.id, 'Transaction cancelled at confirmation');
+    const { categoriesEnabled, skipCategoryStep } = ctx.wizard.state;
+
+    if (categoriesEnabled && !skipCategoryStep) {
+      // Expect an account: callback (categories were just selected in step 4)
+      if (!ctx.callbackQuery?.data?.startsWith('account:')) return;
+
+      const accountId = ctx.callbackQuery.data.split(':')[1];
+      const acc = ctx.wizard.state.accounts.find((a) => a.id === accountId);
+      if (!acc) {
+        await ctx.answerCbQuery('❌ Akun tidak ditemukan');
+        return;
+      }
+
+      ctx.wizard.state.selected.account = { id: accountId, name: acc.name };
+      log.user(ctx.from.id, 'Account selected (after category)', {
+        accountId,
+        accountName: acc.name,
+      });
+
+      await showConfirm(ctx);
+      return ctx.wizard.next(); // → step 6
+    }
+
+    // categories OFF or skipCategoryStep: expect confirm callback
+    if (!ctx.callbackQuery?.data?.startsWith('confirm:')) return;
+    if (ctx.callbackQuery.data === 'confirm:no') {
       await ctx.editMessageText('❌ Dibatalkan.');
       return ctx.scene.leave();
     }
 
-    const { tx, selected, accounts, apiKey } = ctx.wizard.state;
-    const payload = {
-      transaction: {
-        account_id: selected.account.id,
-        description: tx.name,
-        date: tx.date,
-        amount: tx.amount,
-        nature: 'expense',
-      },
-    };
+    return submitTransaction(ctx);
+  },
 
-    log.user(ctx.from.id, 'Submitting transaction', {
-      description: tx.name,
-      amount: tx.amount,
-      date: tx.date,
-      accountId: selected.account.id,
-    });
-
-    try {
-      const api = createApiInstance(apiKey);
-      const { status } = await api.post('/transactions', payload);
-
-      if (status === 200 || status === 201) {
-        const selectedAccount = accounts.find(
-          (a) => a.id === selected.account.id,
-        );
-        const prevBalance = selectedAccount.balance;
-        const newBalance =
-          selectedAccount.classification === 'liability'
-            ? increaseCurrency(prevBalance, payload.transaction.amount)
-            : decreaseCurrency(prevBalance, payload.transaction.amount);
-
-        log.user(ctx.from.id, 'Transaction saved successfully', {
-          status,
-          description: tx.name,
-          amount: tx.amount,
-        });
-
-        await ctx.editMessageText(
-          `✅ Tersimpan!\n\n` +
-            `Deskripsi: ${payload.transaction.description}\n` +
-            `Sumber: ${selected.account.name}\n` +
-            `Tanggal: ${payload.transaction.date}\n` +
-            `Jumlah: ${payload.transaction.amount}\n` +
-            `Saldo sebelumnya: ${prevBalance}\n` +
-            `Saldo baru: ${newBalance}`,
-        );
-      } else {
-        log.userError(ctx.from.id, 'Unexpected status from API', { status });
-        await ctx.editMessageText(`Terjadi kesalahan (status ${status}).`);
-      }
-    } catch (e) {
-      const reason = e.response?.data?.message || e.message;
-      log.userError(ctx.from.id, 'Transaction submission failed', { reason });
-      await ctx.editMessageText('❌ Gagal simpan: ' + reason);
+  // ── Step 6 (categories ON only) ────────────────────────────────────────────
+  async (ctx) => {
+    if (!ctx.callbackQuery?.data?.startsWith('confirm:')) return;
+    if (ctx.callbackQuery.data === 'confirm:no') {
+      await ctx.editMessageText('❌ Dibatalkan.');
+      return ctx.scene.leave();
     }
 
-    return ctx.scene.leave();
+    return submitTransaction(ctx);
   },
 );
 
+// ─── Shared wizard helpers ────────────────────────────────────────────────────
+
+async function _loadAndShowAccounts(ctx, api, options = {}) {
+  const replaceMessage = options.replaceMessage === true;
+
+  const notifyAndLeave = async (text) => {
+    if (replaceMessage && ctx.callbackQuery) {
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(text);
+    } else {
+      await ctx.reply(text);
+    }
+    return ctx.scene.leave();
+  };
+
+  let accounts;
+  try {
+    accounts = await fetchAccounts(api);
+  } catch (e) {
+    log.userError(ctx.from.id, 'Failed to fetch accounts', {
+      reason: e?.response?.data || e.message,
+    });
+    return notifyAndLeave(
+      'Gagal mengambil daftar sumber dari API. Coba lagi /create.',
+    );
+  }
+
+  if (!accounts.length) {
+    log.user(ctx.from.id, 'No accounts available');
+    return notifyAndLeave(
+      'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.',
+    );
+  }
+
+  ctx.wizard.state.accounts = accounts;
+  await showAccounts(ctx, { edit: replaceMessage });
+}
+
+async function submitTransaction(ctx) {
+  const { tx, selected, accounts, apiKey } = ctx.wizard.state;
+
+  const payload = {
+    transaction: {
+      account_id: selected.account.id,
+      description: tx.name,
+      date: tx.date,
+      amount: tx.amount,
+      nature: 'expense',
+      ...(selected.category?.id ? { category_id: selected.category.id } : {}),
+    },
+  };
+
+  log.user(ctx.from.id, 'Submitting transaction', {
+    description: tx.name,
+    amount: tx.amount,
+    date: tx.date,
+    accountId: selected.account.id,
+    categoryId: selected.category?.id ?? null,
+  });
+
+  try {
+    const api = createApiInstance(apiKey);
+    const { status } = await api.post('/transactions', payload);
+
+    if (status === 200 || status === 201) {
+      const selectedAccount = accounts.find(
+        (a) => a.id === selected.account.id,
+      );
+      const prevBalance = selectedAccount.balance;
+      const newBalance =
+        selectedAccount.classification === 'liability'
+          ? increaseCurrency(prevBalance, payload.transaction.amount)
+          : decreaseCurrency(prevBalance, payload.transaction.amount);
+
+      log.user(ctx.from.id, 'Transaction saved successfully', {
+        status,
+        description: tx.name,
+        amount: tx.amount,
+      });
+
+      const categoryLine = selected.category
+        ? `Kategori: ${selected.category.name}\n`
+        : '';
+
+      await ctx.editMessageText(
+        `✅ Tersimpan!\n\n` +
+          `Deskripsi: ${payload.transaction.description}\n` +
+          `Sumber: ${selected.account.name}\n` +
+          categoryLine +
+          `Tanggal: ${payload.transaction.date}\n` +
+          `Jumlah: ${payload.transaction.amount}\n` +
+          `Saldo sebelumnya: ${prevBalance}\n` +
+          `Saldo baru: ${newBalance}`,
+      );
+    } else {
+      log.userError(ctx.from.id, 'Unexpected status from API', { status });
+      await ctx.editMessageText(`Terjadi kesalahan (status ${status}).`);
+    }
+  } catch (e) {
+    const reason = e.response?.data?.message || e.message;
+    log.userError(ctx.from.id, 'Transaction submission failed', { reason });
+    await ctx.editMessageText('❌ Gagal simpan: ' + reason);
+  }
+
+  return ctx.scene.leave();
+}
+
 // ─── UI Helpers ───────────────────────────────────────────────────────────────
 
-async function showAccounts(ctx) {
-  const { tx, accounts } = ctx.wizard.state;
+async function showCategories(ctx) {
+  const { tx, categories } = ctx.wizard.state;
   const text =
     `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
-    'Pilih Sumber:';
+    'Pilih Kategori:';
 
-  const rowSize = 3;
-  const buttons = accounts.map((a) =>
-    Markup.button.callback(a.name, `account:${a.id}`),
+  const rowSize = 2;
+  const buttons = categories.map((c) =>
+    Markup.button.callback(c.name, `category:${c.id}`),
   );
   const keyboard = [];
   for (let i = 0; i < buttons.length; i += rowSize) {
@@ -521,12 +693,49 @@ async function showAccounts(ctx) {
   await ctx.reply(text, Markup.inlineKeyboard(keyboard));
 }
 
-async function showConfirm(ctx) {
-  const { tx, selected } = ctx.wizard.state;
+async function showAccounts(ctx, options = {}) {
+  const { tx, accounts, selected } = ctx.wizard.state;
+  const categoryLine = selected?.category
+    ? `Kategori: ${selected.category.name}\n`
+    : '';
+
   const text =
     `Deskripsi: ${tx.name}\n` +
     `Nominal: ${tx.amount}\n` +
     `Tanggal: ${tx.date}\n` +
+    categoryLine +
+    'Pilih Sumber:';
+
+  const rowSize = 2;
+  const buttons = accounts.map((a) =>
+    Markup.button.callback(a.name, `account:${a.id}`),
+  );
+  const keyboard = [];
+  for (let i = 0; i < buttons.length; i += rowSize) {
+    keyboard.push(buttons.slice(i, i + rowSize));
+  }
+  keyboard.push([Markup.button.callback('❌ Batal', 'cancel')]);
+
+  const markup = Markup.inlineKeyboard(keyboard);
+  if (options.edit && ctx.callbackQuery) {
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(text, markup);
+  } else {
+    await ctx.reply(text, markup);
+  }
+}
+
+async function showConfirm(ctx) {
+  const { tx, selected } = ctx.wizard.state;
+  const categoryLine = selected.category
+    ? `Kategori: ${selected.category.name}\n`
+    : '';
+
+  const text =
+    `Deskripsi: ${tx.name}\n` +
+    `Nominal: ${tx.amount}\n` +
+    `Tanggal: ${tx.date}\n` +
+    categoryLine +
     `Sumber: ${selected.account?.name || '-'}\n`;
 
   await ctx.editMessageText(
@@ -545,7 +754,6 @@ const stage = new Scenes.Stage([apiKeyWizard, transactionWizard], { ttl: 600 });
 bot.use(session());
 bot.use(stage.middleware());
 
-// Global request logger
 bot.use((ctx, next) => {
   const userId = ctx.from?.id;
   const type = ctx.updateType;
@@ -568,7 +776,8 @@ bot.start((ctx) => {
         '/create - Buat transaksi baru\n' +
         '/balance - Lihat saldo akun\n' +
         '/reset - Ganti API Key\n' +
-        '/delete - Hapus API Key',
+        '/delete - Hapus API Key\n' +
+        '/toggle_categories - Aktifkan/nonaktifkan pemilihan kategori',
     );
   } else {
     return ctx.reply(
@@ -581,6 +790,10 @@ bot.start((ctx) => {
 bot.command('create', (ctx) => {
   const userId = ctx.from.id;
   log.user(userId, '/create command');
+  console.log(
+    '!dbHelpers.hasApiKey(userId) :>> ',
+    !dbHelpers.hasApiKey(userId),
+  );
   if (!dbHelpers.hasApiKey(userId)) {
     return ctx.reply(
       '❌ API Key belum diatur.\n\n' +
@@ -671,6 +884,29 @@ bot.command('delete', (ctx) => {
   );
 });
 
+// ─── /toggle_categories ───────────────────────────────────────────────────────
+
+bot.command('toggle_categories', (ctx) => {
+  const userId = ctx.from.id;
+  log.user(userId, '/toggle_categories command');
+
+  if (!dbHelpers.hasApiKey(userId)) {
+    return ctx.reply(
+      '❌ API Key belum diatur.\n\n' +
+        'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
+    );
+  }
+
+  const nowEnabled = dbHelpers.toggleCategories(userId);
+
+  return ctx.reply(
+    nowEnabled
+      ? '✅ Pemilihan kategori *diaktifkan*.\n\nSetiap transaksi baru akan meminta Anda memilih kategori.'
+      : '🔕 Pemilihan kategori *dinonaktifkan*.\n\nTransaksi akan dibuat tanpa kategori.',
+    { parse_mode: 'Markdown' },
+  );
+});
+
 bot.command('new', (ctx) => {
   log.user(ctx.from.id, '/new command (deprecated)');
   return ctx.reply(
@@ -688,7 +924,8 @@ bot.on('message', (ctx) => {
       'Perintah yang tersedia:\n' +
         '/create - Buat transaksi baru\n' +
         '/balance - Lihat saldo akun\n' +
-        '/reset - Ganti API Key',
+        '/reset - Ganti API Key\n' +
+        '/toggle_categories - Aktifkan/nonaktifkan kategori',
     );
   }
 });

@@ -680,7 +680,7 @@ async function showCategories(ctx) {
     `Tanggal: ${tx.date}\n` +
     'Pilih Kategori:';
 
-  const rowSize = 2;
+  const rowSize = 3;
   const buttons = categories.map((c) =>
     Markup.button.callback(c.name, `category:${c.id}`),
   );
@@ -706,7 +706,7 @@ async function showAccounts(ctx, options = {}) {
     categoryLine +
     'Pilih Sumber:';
 
-  const rowSize = 2;
+  const rowSize = 3;
   const buttons = accounts.map((a) =>
     Markup.button.callback(a.name, `account:${a.id}`),
   );
@@ -840,6 +840,10 @@ bot.command('balance', async (ctx) => {
       const accountName = escapeMarkdown(account.name);
       const classification =
         account.classification === 'liability' ? '💳' : '💰';
+      message += `${index + 1}. *${accountName}*\n`;
+      message += `    ${account.balance} ${classification}\n`;
+      message += `    _${escapeMarkdown(account.account_type)}_\n\n`;
+      if (account.currency !== 'IDR') return;
       const numeric = parseFloat(
         account.balance.replace(/[Rp\s.]/g, '').replace(',', '.'),
       );
@@ -848,9 +852,6 @@ bot.command('balance', async (ctx) => {
       } else {
         totalBalance += numeric;
       }
-      message += `${index + 1}. *${accountName}*\n`;
-      message += `    ${account.balance} ${classification}\n`;
-      message += `    _${escapeMarkdown(account.account_type)}_\n\n`;
     });
 
     message += '━━━━━━━━━━━━━━━━\n';

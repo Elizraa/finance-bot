@@ -17,15 +17,13 @@ export function createTransactionWizard({
 
     // ── Step 0 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       const userId = ctx.from.id;
       const apiKey = dbHelpers.getApiKey(userId);
 
       if (!apiKey) {
         log.user(userId, 'Attempted /create without API key');
-        await ctx.reply(
-          '❌ API Key belum diatur.\n\n' +
-            'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
-        );
+        await ctx.reply(t('common.noApiKey'));
         return ctx.scene.leave();
       }
 
@@ -35,17 +33,18 @@ export function createTransactionWizard({
       ctx.wizard.state.categoriesEnabled = dbHelpers.getCategoriesEnabled(userId);
 
       await ctx.reply(
-        'Deskripsi transaksi? (ketik bebas)',
-        Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]]),
+        t('wizard.transaction.askDescription'),
+        Markup.inlineKeyboard([[Markup.button.callback(t('btn.cancel'), 'cancel')]]),
       );
       return ctx.wizard.next();
     },
 
     // ── Step 1 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (ctx.callbackQuery?.data === 'cancel') {
         log.user(ctx.from.id, 'Transaction cancelled at description step');
-        await ctx.editMessageText('❌ Transaksi dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.cancelled'));
         return ctx.scene.leave();
       }
       if (!ctx.message?.text) return;
@@ -56,17 +55,18 @@ export function createTransactionWizard({
       });
 
       await ctx.reply(
-        'Nominal transaksi? (angka)',
-        Markup.inlineKeyboard([[Markup.button.callback('❌ Batal', 'cancel')]]),
+        t('wizard.transaction.askAmount'),
+        Markup.inlineKeyboard([[Markup.button.callback(t('btn.cancel'), 'cancel')]]),
       );
       return ctx.wizard.next();
     },
 
     // ── Step 2 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (ctx.callbackQuery?.data === 'cancel') {
         log.user(ctx.from.id, 'Transaction cancelled at amount step');
-        await ctx.editMessageText('❌ Transaksi dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.cancelled'));
         return ctx.scene.leave();
       }
       if (!ctx.message?.text) return;
@@ -76,7 +76,7 @@ export function createTransactionWizard({
         log.user(ctx.from.id, 'Invalid amount entered', {
           raw: ctx.message.text,
         });
-        await ctx.reply('Nominal tidak valid. Coba lagi.');
+        await ctx.reply(t('wizard.transaction.invalidAmount'));
         return;
       }
 
@@ -90,6 +90,7 @@ export function createTransactionWizard({
 
     // ── Step 3 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (!ctx.callbackQuery) return;
 
       const selected = calendar.clickButtonCalendar(ctx);
@@ -99,9 +100,7 @@ export function createTransactionWizard({
         log.user(ctx.from.id, 'Future date selected, aborting', {
           date: selected,
         });
-        await ctx.reply(
-          '❌ Dibatalkan, Tidak bisa memilih tanggal di masa depan.',
-        );
+        await ctx.reply(t('wizard.transaction.futureDate'));
         return ctx.scene.leave();
       }
 
@@ -119,9 +118,7 @@ export function createTransactionWizard({
           log.userError(ctx.from.id, 'Failed to fetch categories', {
             reason: e?.response?.data || e.message,
           });
-          await ctx.reply(
-            'Gagal mengambil daftar kategori dari API. Coba lagi /create.',
-          );
+          await ctx.reply(t('wizard.transaction.failedCategories'));
           return ctx.scene.leave();
         }
 
@@ -147,8 +144,9 @@ export function createTransactionWizard({
 
     // ── Step 4 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (ctx.callbackQuery?.data === 'cancel') {
-        await ctx.editMessageText('❌ Transaksi dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.cancelled'));
         return ctx.scene.leave();
       }
 
@@ -160,7 +158,7 @@ export function createTransactionWizard({
         const categoryId = ctx.callbackQuery.data.split(':')[1];
         const cat = ctx.wizard.state.categories.find((c) => c.id === categoryId);
         if (!cat) {
-          await ctx.answerCbQuery('❌ Kategori tidak ditemukan');
+          await ctx.answerCbQuery(t('btn.categoryNotFound'));
           return;
         }
 
@@ -180,7 +178,7 @@ export function createTransactionWizard({
       const accountId = ctx.callbackQuery.data.split(':')[1];
       const acc = ctx.wizard.state.accounts.find((a) => a.id === accountId);
       if (!acc) {
-        await ctx.answerCbQuery('❌ Akun tidak ditemukan');
+        await ctx.answerCbQuery(t('btn.accountNotFound'));
         return;
       }
 
@@ -196,8 +194,9 @@ export function createTransactionWizard({
 
     // ── Step 5 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (ctx.callbackQuery?.data === 'cancel') {
-        await ctx.editMessageText('❌ Transaksi dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.cancelled'));
         return ctx.scene.leave();
       }
 
@@ -209,7 +208,7 @@ export function createTransactionWizard({
         const accountId = ctx.callbackQuery.data.split(':')[1];
         const acc = ctx.wizard.state.accounts.find((a) => a.id === accountId);
         if (!acc) {
-          await ctx.answerCbQuery('❌ Akun tidak ditemukan');
+          await ctx.answerCbQuery(t('btn.accountNotFound'));
           return;
         }
 
@@ -225,7 +224,7 @@ export function createTransactionWizard({
 
       if (!ctx.callbackQuery?.data?.startsWith('confirm:')) return;
       if (ctx.callbackQuery.data === 'confirm:no') {
-        await ctx.editMessageText('❌ Dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.confirm.cancelled'));
         return ctx.scene.leave();
       }
 
@@ -234,9 +233,10 @@ export function createTransactionWizard({
 
     // ── Step 6 ─────────────────────────────────────────────────────────────────
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       if (!ctx.callbackQuery?.data?.startsWith('confirm:')) return;
       if (ctx.callbackQuery.data === 'confirm:no') {
-        await ctx.editMessageText('❌ Dibatalkan.');
+        await ctx.editMessageText(t('wizard.transaction.confirm.cancelled'));
         return ctx.scene.leave();
       }
 
@@ -246,13 +246,20 @@ export function createTransactionWizard({
 
   // ─── UI Helpers ────────────────────────────────────────────────────────────────
 
+  function _lbl(ctx, path, params) {
+    return ctx.state.i18n.t(path, params);
+  }
+
   async function _showCategories(ctx) {
     const { tx, categories } = ctx.wizard.state;
+    const t = (path) => ctx.state.i18n.t(path);
+    const lbl = (path) => ctx.state.i18n.t(`wizard.transaction.labels.${path}`);
+
     const text =
-      `Deskripsi: ${tx.name}\n` +
-      `Nominal: ${tx.amount}\n` +
-      `Tanggal: ${tx.date}\n` +
-      'Pilih Kategori:';
+      `${lbl('description')}: ${tx.name}\n` +
+      `${lbl('nominal')}: ${tx.amount}\n` +
+      `${lbl('date')}: ${tx.date}\n` +
+      lbl('selectCategory');
 
     const rowSize = 3;
     const buttons = categories.map((c) =>
@@ -262,23 +269,26 @@ export function createTransactionWizard({
     for (let i = 0; i < buttons.length; i += rowSize) {
       keyboard.push(buttons.slice(i, i + rowSize));
     }
-    keyboard.push([Markup.button.callback('❌ Batal', 'cancel')]);
+    keyboard.push([Markup.button.callback(t('btn.cancel'), 'cancel')]);
 
     await ctx.reply(text, Markup.inlineKeyboard(keyboard));
   }
 
   async function _showAccounts(ctx, options = {}) {
     const { tx, accounts, selected } = ctx.wizard.state;
+    const t = (path) => ctx.state.i18n.t(path);
+    const lbl = (path) => ctx.state.i18n.t(`wizard.transaction.labels.${path}`);
+
     const categoryLine = selected?.category
-      ? `Kategori: ${selected.category.name}\n`
+      ? `${lbl('category')}: ${selected.category.name}\n`
       : '';
 
     const text =
-      `Deskripsi: ${tx.name}\n` +
-      `Nominal: ${tx.amount}\n` +
-      `Tanggal: ${tx.date}\n` +
+      `${lbl('description')}: ${tx.name}\n` +
+      `${lbl('nominal')}: ${tx.amount}\n` +
+      `${lbl('date')}: ${tx.date}\n` +
       categoryLine +
-      'Pilih Sumber:';
+      lbl('selectSource');
 
     const rowSize = 3;
     const buttons = accounts.map((a) =>
@@ -288,7 +298,7 @@ export function createTransactionWizard({
     for (let i = 0; i < buttons.length; i += rowSize) {
       keyboard.push(buttons.slice(i, i + rowSize));
     }
-    keyboard.push([Markup.button.callback('❌ Batal', 'cancel')]);
+    keyboard.push([Markup.button.callback(t('btn.cancel'), 'cancel')]);
 
     const markup = Markup.inlineKeyboard(keyboard);
     if (options.edit && ctx.callbackQuery) {
@@ -301,22 +311,25 @@ export function createTransactionWizard({
 
   async function _showConfirm(ctx) {
     const { tx, selected } = ctx.wizard.state;
+    const t = (path) => ctx.state.i18n.t(path);
+    const lbl = (path) => ctx.state.i18n.t(`wizard.transaction.labels.${path}`);
+
     const categoryLine = selected.category
-      ? `Kategori: ${selected.category.name}\n`
+      ? `${lbl('category')}: ${selected.category.name}\n`
       : '';
 
     const text =
-      `Deskripsi: ${tx.name}\n` +
-      `Nominal: ${tx.amount}\n` +
-      `Tanggal: ${tx.date}\n` +
+      `${lbl('description')}: ${tx.name}\n` +
+      `${lbl('nominal')}: ${tx.amount}\n` +
+      `${lbl('date')}: ${tx.date}\n` +
       categoryLine +
-      `Sumber: ${selected.account?.name || '-'}\n`;
+      `${lbl('source')}: ${selected.account?.name || '-'}\n`;
 
     await ctx.editMessageText(
       text,
       Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Simpan', 'confirm:yes')],
-        [Markup.button.callback('❌ Batal', 'confirm:no')],
+        [Markup.button.callback(t('btn.save'), 'confirm:yes')],
+        [Markup.button.callback(t('btn.cancel'), 'confirm:no')],
       ]),
     );
   }
@@ -334,6 +347,8 @@ export function createTransactionWizard({
       return ctx.scene.leave();
     };
 
+    const t = (path) => ctx.state.i18n.t(path);
+
     let accounts;
     try {
       accounts = await fetchAccounts(api);
@@ -341,16 +356,12 @@ export function createTransactionWizard({
       log.userError(ctx.from.id, 'Failed to fetch accounts', {
         reason: e?.response?.data || e.message,
       });
-      return notifyAndLeave(
-        'Gagal mengambil daftar sumber dari API. Coba lagi /create.',
-      );
+      return notifyAndLeave(t('wizard.transaction.failedAccounts'));
     }
 
     if (!accounts.length) {
       log.user(ctx.from.id, 'No accounts available');
-      return notifyAndLeave(
-        'Tidak ada sumber tersedia. Tambahkan sumber dulu di aplikasi.',
-      );
+      return notifyAndLeave(t('wizard.transaction.noAccounts'));
     }
 
     ctx.wizard.state.accounts = accounts;
@@ -359,6 +370,8 @@ export function createTransactionWizard({
 
   async function _submitTransaction(ctx) {
     const { tx, selected, accounts, apiKey } = ctx.wizard.state;
+    const t = (path) => ctx.state.i18n.t(path);
+    const lbl = (path) => ctx.state.i18n.t(`wizard.transaction.labels.${path}`);
 
     const payload = {
       transaction: {
@@ -400,27 +413,31 @@ export function createTransactionWizard({
         });
 
         const categoryLine = selected.category
-          ? `Kategori: ${selected.category.name}\n`
+          ? `${lbl('category')}: ${selected.category.name}\n`
           : '';
 
         await ctx.editMessageText(
-          `✅ Tersimpan!\n\n` +
-            `Deskripsi: ${payload.transaction.description}\n` +
-            `Sumber: ${selected.account.name}\n` +
+          `${t('wizard.transaction.submitted')}\n\n` +
+            `${lbl('description')}: ${payload.transaction.description}\n` +
+            `${lbl('source')}: ${selected.account.name}\n` +
             categoryLine +
-            `Tanggal: ${payload.transaction.date}\n` +
-            `Jumlah: ${payload.transaction.amount}\n` +
-            `Saldo sebelumnya: ${prevBalance}\n` +
-            `Saldo baru: ${newBalance}`,
+            `${lbl('date')}: ${payload.transaction.date}\n` +
+            `${lbl('nominal')}: ${payload.transaction.amount}\n` +
+            `${lbl('prevBalance')}: ${prevBalance}\n` +
+            `${lbl('newBalance')}: ${newBalance}`,
         );
       } else {
         log.userError(ctx.from.id, 'Unexpected status from API', { status });
-        await ctx.editMessageText(`Terjadi kesalahan (status ${status}).`);
+        await ctx.editMessageText(
+          t('wizard.transaction.errorStatus', { status }),
+        );
       }
     } catch (e) {
       const reason = e.response?.data?.message || e.message;
       log.userError(ctx.from.id, 'Transaction submission failed', { reason });
-      await ctx.editMessageText('❌ Gagal simpan: ' + reason);
+      await ctx.editMessageText(
+        t('wizard.transaction.failedSubmit', { reason }),
+      );
     }
 
     return ctx.scene.leave();

@@ -29,6 +29,15 @@ try {
   // Column already exists
 }
 
+try {
+  db.exec(
+    `ALTER TABLE user_api_keys ADD COLUMN language TEXT NOT NULL DEFAULT 'id'`,
+  );
+  log.info('Migrated user_api_keys: added language column');
+} catch {
+  // Column already exists
+}
+
 log.info('Database initialised', { file: 'bot_data.db' });
 
 export const dbHelpers = {
@@ -107,6 +116,24 @@ export const dbHelpers = {
     ).run(next, userId);
     log.user(userId, 'Categories toggled', { enabled: next === 1 });
     return next === 1;
+  },
+
+  getLanguage(userId) {
+    const row = db
+      .prepare('SELECT language FROM user_api_keys WHERE user_id = ?')
+      .get(userId);
+    return row ? row.language : 'id';
+  },
+
+  setLanguage(userId, lang) {
+    db.prepare(
+      `INSERT INTO user_api_keys (user_id, api_key, language, updated_at)
+       VALUES (?, '', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+         language = excluded.language,
+         updated_at = CURRENT_TIMESTAMP`,
+    ).run(userId, lang);
+    log.user(userId, 'Language changed', { language: lang });
   },
 };
 

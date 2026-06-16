@@ -1,14 +1,12 @@
 export default function register(bot, { log, dbHelpers, createApiInstance }) {
   bot.command('balance', async (ctx) => {
     const userId = ctx.from.id;
+    const { t } = ctx.state.i18n;
     log.user(userId, '/balance command');
     const apiKey = dbHelpers.getApiKey(userId);
 
     if (!apiKey) {
-      return ctx.reply(
-        '❌ API Key belum diatur.\n\n' +
-          'Gunakan /reset untuk mengatur API Key terlebih dahulu.',
-      );
+      return ctx.reply(t('common.noApiKey'));
     }
 
     try {
@@ -19,14 +17,14 @@ export default function register(bot, { log, dbHelpers, createApiInstance }) {
       log.user(userId, 'Balance fetched', { accountCount: accounts.length });
 
       if (!accounts.length) {
-        return ctx.reply('📊 Tidak ada akun ditemukan.');
+        return ctx.reply(t('cmd.balance.noAccounts'));
       }
 
       let totalBalance = 0;
       const escapeMarkdown = (text) =>
         text.replace(/[_*[\]()~`>#+=|{}.!-]/g, ' ');
 
-      let message = '💰 *Saldo Akun Anda*\n\n';
+      let message = `${t('cmd.balance.title')}\n\n`;
       accounts.forEach((account, index) => {
         const accountName = escapeMarkdown(account.name);
         const classification =
@@ -45,8 +43,9 @@ export default function register(bot, { log, dbHelpers, createApiInstance }) {
         }
       });
 
+      const locale = ctx.state.i18n.locale === 'id' ? 'id-ID' : 'en-US';
       message += '━━━━━━━━━━━━━━━━\n';
-      message += `*Total: ${totalBalance.toLocaleString('id-ID', {
+      message += `*${t('cmd.balance.total')}: ${totalBalance.toLocaleString(locale, {
         style: 'currency',
         currency: 'IDR',
       })}*`;
@@ -56,9 +55,7 @@ export default function register(bot, { log, dbHelpers, createApiInstance }) {
       const reason = e?.response?.data || e.message;
       log.userError(userId, 'Failed to fetch balance', { reason });
       await ctx.reply(
-        '❌ Gagal mengambil data saldo.\n\n' +
-          'Error: ' +
-          (e.response?.data?.message || e.message),
+        `${t('cmd.balance.error')}\n\n${e.response?.data?.message || e.message}`,
       );
     }
   });

@@ -6,6 +6,7 @@ dotenv.config();
 
 import { log } from './lib/logger.js';
 import db, { dbHelpers } from './lib/database.js';
+import { createI18n, getAvailableLocales } from './lib/i18n.js';
 import {
   createApiInstance,
   fetchAccounts,
@@ -24,6 +25,7 @@ import registerBalance from './commands/balance.js';
 import registerDelete from './commands/delete.js';
 import registerToggleCategories from './commands/toggle_categories.js';
 import registerNew from './commands/new.js';
+import registerLanguage from './commands/language.js';
 
 // ─── Environment ────────────────────────────────────────────────────────────────
 
@@ -70,6 +72,16 @@ const scenes = [
 const stage = new Scenes.Stage(scenes, { ttl: 600 });
 
 bot.use(session());
+
+// ─── i18n Middleware ─────────────────────────────────────────────────────────────
+
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  const locale = userId ? dbHelpers.getLanguage(userId) : 'id';
+  ctx.state.i18n = createI18n(locale);
+  return next();
+});
+
 bot.use(stage.middleware());
 
 bot.use((ctx, next) => {
@@ -91,21 +103,17 @@ registerBalance(bot, deps);
 registerDelete(bot, deps);
 registerToggleCategories(bot, deps);
 registerNew(bot, deps);
+registerLanguage(bot, deps);
 
 // ─── Catch-all ──────────────────────────────────────────────────────────────────
 
 bot.on('message', (ctx) => {
   if (!ctx.scene?.current) {
+    const { t } = ctx.state.i18n;
     log.user(ctx.from.id, 'Unhandled message outside scene', {
       text: ctx.message?.text,
     });
-    return ctx.reply(
-      'Perintah yang tersedia:\n' +
-        '/create - Buat transaksi baru\n' +
-        '/balance - Lihat saldo akun\n' +
-        '/reset - Ganti API Key\n' +
-        '/toggle_categories - Aktifkan/nonaktifkan kategori',
-    );
+    return ctx.reply(t('cmd.available'));
   }
 });
 

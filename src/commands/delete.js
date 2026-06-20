@@ -1,14 +1,12 @@
 export default function register(bot, { log, dbHelpers }) {
   bot.command('delete', (ctx) => {
     const userId = ctx.from.id;
+    const { t } = ctx.state.i18n;
     log.user(userId, '/delete command');
     if (!dbHelpers.hasApiKey(userId)) {
-      return ctx.reply('❌ Anda belum memiliki API Key yang tersimpan.');
+      return ctx.reply(t('cmd.delete.noKey'));
     }
     dbHelpers.deleteApiKey(userId);
-    return ctx.reply(
-      '✅ API Key berhasil dihapus.\n\n' +
-        'Gunakan /reset untuk mengatur API Key baru.',
-    );
+    return ctx.reply(t('cmd.delete.deleted'));
   });
 }

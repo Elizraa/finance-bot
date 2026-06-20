@@ -5,17 +5,17 @@ export function createApiKeyWizard({ log, createApiInstance, dbHelpers }) {
     'api-key-wizard',
 
     async (ctx) => {
+      const { t } = ctx.state.i18n;
       log.user(ctx.from.id, 'Entered api-key-wizard');
-      await ctx.reply(
-        '🔑 Silakan masukkan API Key Anda:\n\n' +
-          '(API Key akan disimpan dengan enkripsi dan digunakan untuk semua transaksi Anda)',
-      );
+      await ctx.reply(t('wizard.apiKey.ask'));
       return ctx.wizard.next();
     },
 
     async (ctx) => {
+      const { t } = ctx.state.i18n;
+
       if (!ctx.message?.text) {
-        await ctx.reply('❌ Harap kirim API Key dalam bentuk teks.');
+        await ctx.reply(t('wizard.apiKey.nonText'));
         return;
       }
 
@@ -38,20 +38,11 @@ export function createApiKeyWizard({ log, createApiInstance, dbHelpers }) {
         dbHelpers.saveApiKey(userId, apiKey);
         log.user(userId, 'API key validated and saved');
 
-        await ctx.reply(
-          '✅ API Key berhasil disimpan!\n\n' +
-            'Gunakan /create untuk membuat transaksi baru.',
-        );
+        await ctx.reply(t('wizard.apiKey.saved'));
       } catch (e) {
         const reason = e.response?.data?.message || e.message;
         log.userError(userId, 'API key validation failed', { reason });
-        await ctx.reply(
-          '❌ API Key tidak valid atau gagal terhubung ke server.\n\n' +
-            'Error: ' +
-            reason +
-            '\n\n' +
-            'Silakan coba lagi dengan /reset',
-        );
+        await ctx.reply(t('wizard.apiKey.invalid', { reason }));
       }
 
       return ctx.scene.leave();

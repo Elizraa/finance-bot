@@ -12,7 +12,7 @@ export default function register(bot, { log, dbHelpers, createApiInstance }) {
     try {
       const api = createApiInstance(apiKey);
       const { data } = await api.get('/accounts');
-      const accounts = Array.isArray(data) ? data : data.accounts || [];
+      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
 
       log.user(userId, 'Balance fetched', { accountCount: accounts.length });
 
